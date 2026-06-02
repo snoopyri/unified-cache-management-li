@@ -157,6 +157,37 @@ class UcmPipelineStore(UcmKVStoreBaseV1):
     def check(self, task: Task) -> bool:
         return self.store_.Check(task.task_id)
 
+    # *** register_memory: 注册设备内存区域用于传输操作，转发给底层C++ PipelineStore
+    def register_memory(self, base_addr: int, total_size: int) -> None:
+        self.store_.RegisterMemory(base_addr, total_size)
+
+
+# *** _yuanrong_pipeline_builder: 构建纯Yuanrong存储管线（无后端持久化）
+def _yuanrong_pipeline_builder(
+    config: Dict[str, object], pipeline: ucmpipelinestore.PipelineStore
+):
+    store_dir = Path(__file__).resolve().parent.parent
+    pipeline.Stack(
+        "Yuanrong", str(store_dir / "yuanrongstore/libyuanrongstore.so"), config
+    )
+
+
+# *** _yuanrong_posix_pipeline_builder: 构建Yuanrong|Posix双层存储管线
+# *** Yuanrong负责HeteroClient传输，Posix负责本地持久化（miss shard的fallback后端）
+def _yuanrong_posix_pipeline_builder(
+    config: Dict[str, object], pipeline: ucmpipelinestore.PipelineStore
+):
+    store_dir = Path(__file__).resolve().parent.parent
+    posix_config = copy.deepcopy(config)
+    # *** 传输模式时Posix需要tensor_size配置用于数据搬运
+    if config.get("device_id", -1) >= 0:
+        posix_config |= {"tensor_size": config["shard_size"]}
+    # *** Posix层在底层，Yuanrong层在上层。Yuanrong miss时fallback到Posix
+    pipeline.Stack("Posix", str(store_dir / "posix/libposixstore.so"), posix_config)
+    pipeline.Stack(
+        "Yuanrong", str(store_dir / "yuanrongstore/libyuanrongstore.so"), config
+    )
+
 
 def _cache_ds3fs_pipeline_builder(
     config: Dict[str, object], pipeline: ucmpipelinestore.PipelineStore
@@ -257,3 +288,5 @@ UcmPipelineStoreBuilder.register(
     "Cache|Compress|Posix", _build_cache_compress_posix_pipeline
 )
 UcmPipelineStoreBuilder.register("Cache|Fake", _cache_fake_pipeline_builder)
+UcmPipelineStoreBuilder.register("Yuanrong", _yuanrong_pipeline_builder)  # *** 注册Yuanrong管线构建器
+UcmPipelineStoreBuilder.register("Yuanrong|Posix", _yuanrong_posix_pipeline_builder)  # *** 注册Yuanrong|Posix双层管线构建器

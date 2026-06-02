@@ -161,6 +161,12 @@ Status Ds3fsStore::Wait(Detail::TaskHandle taskId)
     return s;
 }
 
+// *** RegisterMemory: 空实现（Ds3fsStore不需要注册设备内存）
+Status Ds3fsStore::RegisterMemory(void* base_addr, size_t total_size)
+{
+    return Status::OK();
+}
+
 }  // namespace UC::Ds3fsStore
 
 extern "C" UC::StoreV1* MakeDs3fsStore() { return new UC::Ds3fsStore::Ds3fsStore(); }

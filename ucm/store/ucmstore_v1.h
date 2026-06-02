@@ -147,6 +147,20 @@ public:
      */
     virtual Status Wait(Detail::TaskHandle taskId) = 0;
 
+    /**
+     * @brief Register device memory region for transfer operations.
+     *
+     * Some transfer backends (e.g., Mooncake RDMA) require explicit memory
+     * registration before Load/Dump operations can target addresses within
+     * that region.  Others (e.g., Yuanrong) manage device memory internally
+     * via DeviceBlobList.deviceIdx and can safely ignore this call.
+     *
+     * @param base_addr Start address of the contiguous device memory region.
+     * @param total_size Size of the region in bytes.
+     * @return Status::OK on success (or if registration is not needed).
+     */
+    virtual Status RegisterMemory(void* base_addr, size_t total_size) = 0;
+
 protected:
     /**
      * @brief Protected default constructor.

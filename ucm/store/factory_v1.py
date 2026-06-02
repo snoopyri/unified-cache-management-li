@@ -68,3 +68,7 @@ UcmConnectorFactoryV1.register_connector(
 UcmConnectorFactoryV1.register_connector(
     "UcmPipelineStore", "ucm.store.pipeline.connector", "UcmPipelineStore"
 )
+# *** 注册YuanrongStore V1 connector（供factory直接使用）
+UcmConnectorFactoryV1.register_connector(
+    "UcmYuanrongStore", "ucm.store.yuanrongstore.yuanrong_connector", "UcmYuanrongStore"
+)

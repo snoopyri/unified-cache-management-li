@@ -11,5 +11,6 @@ add_subdirectory(cache)
 add_subdirectory(empty)
 add_subdirectory(fake)
 add_subdirectory(mooncakestore)
+add_subdirectory(yuanrongstore)  # *** YuanrongStore子目录
 add_subdirectory(pipeline)
 add_subdirectory(test)

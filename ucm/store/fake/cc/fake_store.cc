@@ -82,6 +82,8 @@ public:
     }
     Expected<bool> Check(Detail::TaskHandle taskId) override { return true; }
     Status Wait(Detail::TaskHandle taskId) override { return Status::OK(); }
+    // *** RegisterMemory: 空实现（FakeStore不涉及真实数据传输）
+    Status RegisterMemory(void* base_addr, size_t total_size) override { return Status::OK(); }
 
 private:
     static Detail::TaskHandle NextId() noexcept

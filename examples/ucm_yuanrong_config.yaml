@@ -1,0 +1,38 @@
+# *** YuanrongStore配置示例
+# *** 传输模式配置（deviceId>=0启用HeteroClient数据搬运）
+store_pipeline: "Yuanrong|Posix"  # *** 管线类型：Yuanrong负责RDMA传输，Posix负责本地持久化
+
+# *** yuanrong-datasystem连接配置
+local_hostname: "192.168.1.100"  # *** yuanrong-datasystem服务主机名/IP
+port: 2379  # *** yuanrong-datasystem服务端口（默认2379）
+device_id: 0  # *** NPU设备ID（>=0启用传输模式，<0仅调度模式）
+enable_remote_h2d: true  # *** 是否启用远程H2D直传
+
+# *** Tensor/Shard配置
+shard_size: 4096  # *** shard大小（字节）
+tensor_size_list: []  # *** 每个tensor的大小列表（空则由shard_size自动推导）
+block_size: 65536  # *** block大小（字节）
+
+# *** 队列配置
+load_queue_depth: 524288  # *** 加载队列深度
+dump_queue_depth: 8192  # *** 卸载队列深度
+host_buf_pool_size: 1024  # *** 主机缓冲池大小（缓冲区数量）
+
+# *** 传输配置
+stream_number: 4  # *** Ascend stream数量
+timeout_ms: 60000  # *** 任务超时时间（毫秒）
+cpu_affinity_cores: []  # *** CPU亲和核心列表
+
+# *** MSet参数
+write_mode: 0  # *** 写入模式（0=默认）
+ttl_second: 0  # *** TTL秒数（0=永不过期）
+cache_type: 0  # *** 缓存类型
+
+# *** IO配置
+io_direct: false  # *** 是否使用DirectIO（大页内存）
+
+# *** Posix后端配置（Yuanrong|Posix管线中的Posix层）
+storage_backends:
+  - "/tmp/ucm_posix_storage"
+posix_io_engine: "psync"
+posix_data_trans_concurrency: 4

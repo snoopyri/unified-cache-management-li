@@ -202,3 +202,20 @@ class UcmKVStoreBaseV1(ABC):
             ``True`` if the task has finished, ``False`` if still in-flight.
         """
         pass
+
+    # *** register_memory: 注册设备内存区域用于传输操作
+    # *** 某些传输后端（如Mooncake RDMA）需要显式注册设备内存，其他（如Yuanrong）可安全忽略此调用
+    @abstractmethod
+    def register_memory(self, base_addr: int, total_size: int) -> None:
+        """Register device memory region for transfer operations.
+
+        Some transfer backends (e.g., Mooncake RDMA) require explicit memory
+        registration before Load/Dump operations can target addresses within
+        that region.  Others (e.g., Yuanrong) manage device memory internally
+        and can safely ignore this call.
+
+        Args:
+            base_addr: Start address of the contiguous device memory region (as int pointer).
+            total_size: Size of the region in bytes.
+        """
+        pass

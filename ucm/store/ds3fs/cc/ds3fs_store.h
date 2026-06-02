@@ -41,6 +41,8 @@ public:
     Expected<Detail::TaskHandle> Dump(Detail::TaskDesc task) override;
     Expected<bool> Check(Detail::TaskHandle taskId) override;
     Status Wait(Detail::TaskHandle taskId) override;
+    // *** RegisterMemory: 空实现（Ds3fsStore不需要注册设备内存）
+    Status RegisterMemory(void* base_addr, size_t total_size) override;
 
 private:
     std::shared_ptr<Ds3fsStoreImpl> impl_;

@@ -42,6 +42,8 @@ public:
     Expected<Detail::TaskHandle> Dump(Detail::TaskDesc task) { return NextId(); }
     Expected<bool> Check(Detail::TaskHandle taskId) { return true; }
     Status Wait(Detail::TaskHandle taskId) { return Status::OK(); }
+    // *** RegisterMemory: 空实现（EmptyStore不涉及数据传输）
+    Status RegisterMemory(void* base_addr, size_t total_size) override { return Status::OK(); }
 
 private:
     static Detail::TaskHandle NextId() noexcept

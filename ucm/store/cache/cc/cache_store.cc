@@ -111,6 +111,8 @@ public:
         if (s.Failure()) [[unlikely]] { UC_ERROR("Failed({}) to wait task({}).", s, taskId); }
         return s;
     }
+    // *** RegisterMemory: 空实现（CacheStore内部管理缓冲区，无需注册设备内存）
+    Status RegisterMemory(void* base_addr, size_t total_size) override { return Status::OK(); }
 
 private:
     Config ParseConfig(const Detail::Dictionary& config)

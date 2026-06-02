@@ -168,6 +168,12 @@ public:
         }
         ThrowIfFailed(status);
     }
+    // *** RegisterMemory: 注册设备内存区域用于传输操作，转发给底层C++ PipelineStore
+    void RegisterMemory(uintptr_t base_addr, uintptr_t total_size)
+    {
+        auto s = StoreBack()->RegisterMemory(reinterpret_cast<void*>(base_addr), static_cast<size_t>(total_size));
+        ThrowIfFailed(s);
+    }
 };
 
 }  // namespace UC::PipelineStore
@@ -192,4 +198,6 @@ PYBIND11_MODULE(ucmpipelinestore, m)
           py::arg("addrs").noconvert(), py::arg("prerequisite_handle") = 0);
     s.def("Check", &PipelineStore::Check);
     s.def("Wait", &PipelineStore::Wait);
+    // *** RegisterMemory: 注册设备内存区域，Python通过pipeline_store.py.cc转发给C++
+    s.def("RegisterMemory", &PipelineStore::RegisterMemory, py::arg("base_addr"), py::arg("total_size"));
 }
