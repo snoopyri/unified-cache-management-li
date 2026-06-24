@@ -23,6 +23,7 @@
  * */
 #include "trans_queue.h"
 #include "logger/logger.h"
+#include "metrics_api.h"
 #include "posix_file.h"
 
 namespace UC::PosixStore {
@@ -60,6 +61,7 @@ Status TransQueue::Setup(const Config& config, TaskIdSet* failureSet, const Spac
 
 void TransQueue::OnIoUnitTimeout(IoUnit& ios)
 {
+    UC::Metrics::UpdateStats(NAME_TO_METRIC_ID("posix_io_timeout_total"), 1.0);
     if (!failureSet_->Contains(ios.owner)) { failureSet_->Insert(ios.owner); }
     ios.waiter->Done();
 }
@@ -94,6 +96,8 @@ void TransQueue::LoadWorker(IoUnit& ios)
     if (ios.firstIo) {
         auto wait = NowTime::Now() - ios.waiter->startTp;
         UC_DEBUG("Posix load task({}) start running, wait {:.3f}ms.", ios.owner, wait * 1e3);
+        UC::Metrics::UpdateStats(NAME_TO_METRIC_ID("posix_load_queue_wait_duration_ms"),
+                                 wait * 1e3);
     }
     if (failureSet_->Contains(ios.owner)) {
         ios.waiter->Done();
@@ -109,6 +113,8 @@ void TransQueue::DumpWorker(IoUnit& ios)
     if (ios.firstIo) {
         auto wait = NowTime::Now() - ios.waiter->startTp;
         UC_DEBUG("Posix dump task({}) start running, wait {:.3f}ms.", ios.owner, wait * 1e3);
+        UC::Metrics::UpdateStats(NAME_TO_METRIC_ID("posix_dump_queue_wait_duration_ms"),
+                                 wait * 1e3);
     }
     if (failureSet_->Contains(ios.owner)) {
         ios.waiter->Done();
@@ -131,6 +137,7 @@ Status TransQueue::H2S(IoUnit& ios)
     auto s = file.Open(flags);
     if (s.Failure()) [[unlikely]] {
         UC_ERROR("Failed({}) to open file({}) with flags({}).", s, path, flags);
+        UC::Metrics::UpdateStats(NAME_TO_METRIC_ID("posix_open_errors_total"), 1.0);
         return s;
     }
     auto offset = shardSize_ * ios.shard.index;
@@ -138,6 +145,7 @@ Status TransQueue::H2S(IoUnit& ios)
         s = file.Write(addr, ioSize_, offset);
         if (s.Failure()) [[unlikely]] {
             UC_ERROR("Failed({}) to write file({}:{}).", s, path, offset);
+            UC::Metrics::UpdateStats(NAME_TO_METRIC_ID("posix_io_errors_total"), 1.0);
             return s;
         }
         offset += ioSize_;
@@ -154,6 +162,7 @@ Status TransQueue::S2H(IoUnit& ios)
     auto s = file.Open(flags);
     if (s.Failure()) [[unlikely]] {
         UC_ERROR("Failed({}) to open file({}) with flags({}).", s, path, flags);
+        UC::Metrics::UpdateStats(NAME_TO_METRIC_ID("posix_open_errors_total"), 1.0);
         return s;
     }
     auto offset = shardSize_ * ios.shard.index;
@@ -161,6 +170,7 @@ Status TransQueue::S2H(IoUnit& ios)
         s = file.Read(addr, ioSize_, offset);
         if (s.Failure()) [[unlikely]] {
             UC_ERROR("Failed({}) to read file({}:{}).", s, path, offset);
+            UC::Metrics::UpdateStats(NAME_TO_METRIC_ID("posix_io_errors_total"), 1.0);
             return s;
         }
         offset += ioSize_;
