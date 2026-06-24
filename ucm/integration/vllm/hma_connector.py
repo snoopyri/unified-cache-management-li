@@ -563,6 +563,10 @@ class UCMFAWAConnector(UCMDirectConnector, SupportsHMA):
         config.setdefault("store_pipeline", "Cache|Empty")
         # MLA ranks share one logical store buffer; non-MLA stores are per rank.
         config.setdefault("share_buffer_enable", self.is_mla)
+        config.setdefault(
+            "lazy_shared_buffer_register",
+            self.is_mla and self._role == KVConnectorRole.WORKER,
+        )
         if isinstance(config.get("storage_backends"), str):
             config["storage_backends"] = [
                 path for path in config["storage_backends"].split(":")

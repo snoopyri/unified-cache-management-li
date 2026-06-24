@@ -84,6 +84,11 @@ public:
     Expected<Detail::TaskHandle> Load(Detail::TaskDesc task) override
     {
         if (!transEnable_) { return Status::Error("transfer is not enable"); }
+        auto s = bufferMgr_.Activate();
+        if (s.Failure()) [[unlikely]] {
+            UC_ERROR("Failed({}) to activate cache transfer buffer.", s);
+            return s;
+        }
         auto res = transMgr_.Submit({TransTask::Type::LOAD, std::move(task)});
         if (!res) [[unlikely]] {
             UC_ERROR("Failed({}) to submit load task({}).", res.Error(), task.brief);
@@ -93,6 +98,11 @@ public:
     Expected<Detail::TaskHandle> Dump(Detail::TaskDesc task) override
     {
         if (!transEnable_) { return Status::Error("transfer is not enable"); }
+        auto s = bufferMgr_.Activate();
+        if (s.Failure()) [[unlikely]] {
+            UC_ERROR("Failed({}) to activate cache transfer buffer.", s);
+            return s;
+        }
         auto res = transMgr_.Submit({TransTask::Type::DUMP, std::move(task)});
         if (!res) [[unlikely]] {
             UC_ERROR("Failed({}) to submit dump task({}).", res.Error(), task.brief);
@@ -132,6 +142,7 @@ private:
         config.Get("cpu_affinity_cores", param.cpuAffinityCores);
         if (param.shardSize > 0) { param.waitingQueueDepth *= (param.blockSize / param.shardSize); }
         config.Get("share_buffer_enable", param.shareBufferEnable);
+        config.Get("lazy_shared_buffer_register", param.lazySharedBufferRegister);
         if (!param.shareBufferEnable) { param.bufferCapacity /= 8; }
         config.Get("io_direct", param.ioDirect);
         size_t bufferCapacityGb = 0;

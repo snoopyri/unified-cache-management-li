@@ -65,6 +65,7 @@ public:
         return buffer_->Setup(config);
     }
     TransBuffer* GetTransBuffer() { return buffer_ ? buffer_.get() : nullptr; }
+    Status Activate() { return buffer_ ? buffer_->Activate() : Status::OK(); }
     Expected<std::vector<uint8_t>> Lookup(const Detail::BlockId* blocks, size_t num)
     {
         if (!buffer_ || loadBackendOnly_) { return LookupThrough<&StoreV1::Lookup>(blocks, num); }

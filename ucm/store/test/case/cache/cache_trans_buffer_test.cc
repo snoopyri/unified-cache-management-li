@@ -34,6 +34,40 @@ public:
 
 INSTANTIATE_TEST_CASE_P(SharedCondition, UCCacheTransBufferTest, ::testing::Values(false, true));
 
+TEST_F(UCCacheTransBufferTest, LazySharedBufferRegistersOnActivation)
+{
+    UC::CacheStore::TransBuffer transBuffer;
+    UC::CacheStore::Config config;
+    config.uniqueId = rd.RandomString(10);
+    config.shardSize = 32768;
+    config.bufferCapacity = config.shardSize * 32;
+    config.shareBufferEnable = true;
+    config.lazySharedBufferRegister = true;
+    config.deviceId = 0;
+    config.loadExclusiveBufferNumber = 0;
+
+    ASSERT_EQ(transBuffer.Setup(config), UC::Status::OK());
+    ASSERT_FALSE(transBuffer.IsActive());
+    ASSERT_EQ(transBuffer.Activate(), UC::Status::OK());
+    ASSERT_TRUE(transBuffer.IsActive());
+    ASSERT_EQ(transBuffer.Activate(), UC::Status::OK());
+}
+
+TEST_F(UCCacheTransBufferTest, SharedBufferRegistrationRemainsEagerByDefault)
+{
+    UC::CacheStore::TransBuffer transBuffer;
+    UC::CacheStore::Config config;
+    config.uniqueId = rd.RandomString(10);
+    config.shardSize = 32768;
+    config.bufferCapacity = config.shardSize * 32;
+    config.shareBufferEnable = true;
+    config.deviceId = 0;
+    config.loadExclusiveBufferNumber = 0;
+
+    ASSERT_EQ(transBuffer.Setup(config), UC::Status::OK());
+    ASSERT_TRUE(transBuffer.IsActive());
+}
+
 TEST_P(UCCacheTransBufferTest, GetFirstNode)
 {
     UC::CacheStore::TransBuffer transBuffer;

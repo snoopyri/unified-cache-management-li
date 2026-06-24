@@ -24,6 +24,7 @@
 #include "trans_buffer.h"
 #include <atomic>
 #include <filesystem>
+#include <mutex>
 #include <thread>
 #include <unistd.h>
 #include "logger/logger.h"
@@ -81,6 +82,8 @@ public:
     }
     virtual ~BufferStrategy() = default;
     virtual Status Setup() = 0;
+    virtual Status Activate() { return Status::OK(); }
+    virtual bool IsActive() const { return true; }
     virtual void BucketLock(size_t iBucket) = 0;
     virtual bool BucketTryLock(size_t iBucket) = 0;
     virtual void BucketUnlock(size_t iBucket) = 0;
@@ -244,6 +247,9 @@ protected:
     size_t nNode_{0};
     void* addrress_{nullptr};
     size_t totalSize_{0};
+    bool lazyRegister_{false};
+    bool registered_{false};
+    mutable std::mutex activationMutex_;
 
     size_t MetaOffset() const noexcept { return sizeof(BufferHeader) + sizeof(ShareLock) * nNode_; }
     size_t DataOffset() const noexcept
@@ -370,13 +376,14 @@ protected:
 
 public:
     SharedBufferStrategy(const std::string& uuid, int32_t deviceId, size_t nodeSize,
-                         size_t totalSize, size_t reservedNumber)
-        : BufferStrategy(deviceId, nodeSize, totalSize, reservedNumber), uuid_(uuid)
+                         size_t totalSize, size_t reservedNumber, bool lazyRegister)
+        : BufferStrategy(deviceId, nodeSize, totalSize, reservedNumber), uuid_(uuid),
+          lazyRegister_(lazyRegister)
     {
     }
     ~SharedBufferStrategy() override
     {
-        if (data_) { Trans::Buffer::UnregisterHostBuffer(data_); }
+        if (registered_) { Trans::Buffer::UnregisterHostBuffer(data_); }
         if (addrress_) { PosixShm::MUnmap(addrress_, totalSize_); }
         PosixShm{shmName_}.ShmUnlink();
     }
@@ -404,7 +411,20 @@ public:
             UC_ERROR("Failed({}) to open file({}) with flags({}).", s, shmName_, flags);
             return s;
         }
-        return RegisterBuffer(deviceId);
+        return lazyRegister_ ? Status::OK() : Activate();
+    }
+    Status Activate() override
+    {
+        std::lock_guard<std::mutex> lock(activationMutex_);
+        if (registered_ || base_.deviceId < 0) { return Status::OK(); }
+        auto s = RegisterBuffer(base_.deviceId);
+        if (s.Success()) { registered_ = true; }
+        return s;
+    }
+    bool IsActive() const override
+    {
+        std::lock_guard<std::mutex> lock(activationMutex_);
+        return registered_ || base_.deviceId < 0;
     }
     void BucketLock(size_t iBucket) override { header_->bucketLocks[iBucket].Lock(); }
     bool BucketTryLock(size_t iBucket) override { return header_->bucketLocks[iBucket].TryLock(); }
@@ -428,7 +448,7 @@ public:
 class SharedBufferWatcherStrategy : public SharedBufferStrategy {
 public:
     explicit SharedBufferWatcherStrategy(const std::string& uuid)
-        : SharedBufferStrategy(uuid, -1, 0, 0, 0)
+        : SharedBufferStrategy(uuid, -1, 0, 0, 0, false)
     {
     }
     Status Setup() override
@@ -474,7 +494,7 @@ Status TransBuffer::Setup(const Config& config)
         } else if (config.deviceId >= 0) {
             strategy_ = std::make_shared<SharedBufferStrategy>(
                 config.uniqueId, config.deviceId, config.shardSize, config.bufferCapacity,
-                config.loadExclusiveBufferNumber);
+                config.loadExclusiveBufferNumber, config.lazySharedBufferRegister);
         } else {
             strategy_ = std::make_shared<SharedBufferWatcherStrategy>(config.uniqueId);
         }
@@ -483,6 +503,10 @@ Status TransBuffer::Setup(const Config& config)
     }
     return strategy_->Setup();
 }
+
+Status TransBuffer::Activate() { return strategy_ ? strategy_->Activate() : Status::OK(); }
+
+bool TransBuffer::IsActive() const { return !strategy_ || strategy_->IsActive(); }
 
 TransBuffer::Handle TransBuffer::Get(const Detail::BlockId& blockId, size_t shardIdx,
                                      bool allowReserved, bool isLoad)
