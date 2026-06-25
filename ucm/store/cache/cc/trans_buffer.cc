@@ -390,7 +390,6 @@ public:
     Status Setup() override
     {
         const auto& uuid = uuid_;
-        const auto deviceId = base_.deviceId;
         const auto nodeSize = base_.nodeSize;
         const auto totalSize = base_.totalSize;
         shmName_ = ShmPrefix() + uuid;
