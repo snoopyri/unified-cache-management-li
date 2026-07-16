@@ -1732,6 +1732,143 @@ class UCMLayerWiseConnector(UCMDirectConnector):
         self.dump_total_ptrs = None
 
 
+class UCMLayerwisePerformanceMonitorConnector(UCMLayerWiseConnector):
+    """Layerwise timing monitor that performs no KV-cache I/O.
+
+    The connector models the layerwise hand-off sequence only: it records the
+    time at which a layer's load would be submitted, then reports the elapsed
+    time when that layer reaches ``wait_for_layer_load``.  This makes it useful
+    for measuring how much forward work is available to hide next-layer load
+    latency without requiring a storage backend or changing cache contents.
+    """
+
+    def __init__(
+        self,
+        vllm_config: "VllmConfig",
+        role: KVConnectorRole,
+        kv_cache_config: Optional["KVCacheConfig"] = None,
+    ):
+        # UCMDirectConnector normally creates a scheduler-side store in its
+        # constructor. This monitor intentionally has no store on either side.
+        self._defer_scheduler_store = True
+        super().__init__(vllm_config, role, kv_cache_config)
+        self._load_submit_started_at: dict[int, float] = {}
+        self._hbm_hit_tokens_by_request: dict[str, int] = {}
+        self._monitor_step = 0
+        logger.info("Init UCMLayerwisePerformanceMonitorConnector (no KV I/O).")
+
+    def register_kv_caches(self, kv_caches: dict[str, torch.Tensor]):
+        """Register layer order only; do not create a store or register buffers."""
+        self.kv_caches = kv_caches
+        self.layer_name_to_id = {
+            name: extract_layer_index(name) for name in kv_caches.keys()
+        }
+        self.layer_ids = sorted(set(self.layer_name_to_id.values()))
+        if not self.layer_ids:
+            raise ValueError("Layerwise performance monitor received no KV caches.")
+        self.first_layer_id = self.layer_ids[0]
+        logger.info(
+            "Layerwise performance monitor registered %d layer(s): first=%d, last=%d.",
+            len(self.layer_ids),
+            self.first_layer_id,
+            self.layer_ids[-1],
+        )
+
+    def get_num_new_matched_tokens(
+        self,
+        request: "Request",
+        num_computed_tokens: int,
+    ) -> tuple[int, bool]:
+        # Preserve the scheduler's native HBM-prefix accounting while disabling
+        # all external-cache hits and, consequently, every real load/dump path.
+        request_tokens = getattr(request, "num_tokens", len(request.all_token_ids))
+        self._hbm_hit_tokens_by_request[request.request_id] = min(
+            max(int(num_computed_tokens), 0), max(int(request_tokens), 0)
+        )
+        return 0, False
+
+    @staticmethod
+    def _scheduled_request_ids(scheduler_output: SchedulerOutput) -> list[str]:
+        request_ids = [
+            request.req_id for request in scheduler_output.scheduled_new_reqs
+        ]
+        cached_reqs = scheduler_output.scheduled_cached_reqs
+        if isinstance(cached_reqs, list):
+            request_ids.extend(request.req_id for request in cached_reqs)
+        else:
+            request_ids.extend(getattr(cached_reqs, "req_ids", ()))
+        return request_ids
+
+    def build_connector_meta(
+        self, scheduler_output: SchedulerOutput
+    ) -> KVConnectorMetadata:
+        self._monitor_step += 1
+        request_ids = self._scheduled_request_ids(scheduler_output)
+        scheduled_tokens = sum(
+            int(tokens)
+            for tokens in getattr(scheduler_output, "num_scheduled_tokens", {}).values()
+        )
+        hbm_hit_tokens = sum(
+            self._hbm_hit_tokens_by_request.get(request_id, 0)
+            for request_id in request_ids
+        )
+        hbm_hit_reqs = sum(
+            self._hbm_hit_tokens_by_request.get(request_id, 0) > 0
+            for request_id in request_ids
+        )
+        new_reqs = scheduler_output.scheduled_new_reqs
+        global_rank = self._vllm_config.parallel_config.rank
+        logger.info(
+            "HBM prefix scheduler stats: step=%d, rank=%d, "
+            "scheduled_reqs=%d, new_reqs=%d, hbm_hit_reqs=%d, "
+            "hbm_hit_tokens=%d, scheduled_tokens=%d. "
+            "Padding, physical-token, and forward-duration statistics are "
+            "not available in build_connector_meta.",
+            self._monitor_step,
+            global_rank,
+            len(request_ids),
+            len(new_reqs),
+            hbm_hit_reqs,
+            hbm_hit_tokens,
+            scheduled_tokens,
+        )
+        for request_id in getattr(scheduler_output, "finished_req_ids", ()):
+            self._hbm_hit_tokens_by_request.pop(request_id, None)
+        return UCMConnectorMetadata({}, scheduler_output.preempted_req_ids or set())
+
+    def start_load_kv(self, forward_context: "ForwardContext", **kwargs) -> None:
+        del forward_context, kwargs
+        self._load_submit_started_at.clear()
+        if self.layer_ids:
+            self._load_submit_started_at[self.first_layer_id] = time.perf_counter()
+
+    def wait_for_layer_load(self, layer_name: str) -> None:
+        layer_id = self.layer_name_to_id.get(layer_name)
+        if layer_id is None:
+            return
+        wait_started_at = time.perf_counter()
+        load_submit_started_at = self._load_submit_started_at.pop(layer_id, None)
+        if load_submit_started_at is not None:
+            elapsed_ms = (wait_started_at - load_submit_started_at) * 1000
+            ucmmetrics.update_stats({"layerwise_monitor_load_to_wait_ms": elapsed_ms})
+            logger.info(
+                "Layerwise load-to-wait monitor: layer=%s, layer_id=%d, elapsed_ms=%.3f",
+                layer_name,
+                layer_id,
+                elapsed_ms,
+            )
+
+        next_layer_id = layer_id + 1
+        if next_layer_id in self.layer_ids:
+            self._load_submit_started_at[next_layer_id] = time.perf_counter()
+
+    def save_kv_layer(self, *args, **kwargs) -> None:
+        del args, kwargs
+
+    def wait_for_save(self) -> None:
+        pass
+
+
 class UCMCPConnector(UCMLayerWiseConnector):
     def __init__(
         self,
@@ -2010,9 +2147,14 @@ class UCMConnector(KVConnectorBase_V1, SupportsHMA):
             if self.launch_config is not None
             else False
         )
+        use_layerwise_performance_monitor = (
+            self.launch_config.get("use_layerwise_performance_monitor", False)
+            if self.launch_config is not None
+            else False
+        )
 
         pp_enabled = self._vllm_config.parallel_config.pipeline_parallel_size > 1
-        if pp_enabled and not use_layerwise:
+        if pp_enabled and not (use_layerwise or use_layerwise_performance_monitor):
             raise RuntimeError(
                 "Pipeline parallelism is not supported in UCMDirectConnector, please set use_layerwise=True."
             )
@@ -2052,7 +2194,16 @@ class UCMConnector(KVConnectorBase_V1, SupportsHMA):
             and self.launch_config.get("hybrid_linear_attention_layerwise", True)
         )
 
-        if UCMFAWAConnector.can_handle_kv_cache_config(kv_cache_config):
+        if use_layerwise_performance_monitor:
+            if not use_layerwise:
+                logger.warning(
+                    "use_layerwise_performance_monitor enables layerwise mode; "
+                    "overriding use_layerwise=False."
+                )
+            self.connector = UCMLayerwisePerformanceMonitorConnector(
+                vllm_config, role, kv_cache_config
+            )
+        elif UCMFAWAConnector.can_handle_kv_cache_config(kv_cache_config):
             self.connector = UCMFAWAConnector(vllm_config, role, kv_cache_config)
         elif use_lite:
             self.connector = UCMLiteConnector(vllm_config, role, kv_cache_config)

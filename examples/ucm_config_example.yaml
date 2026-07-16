@@ -41,6 +41,13 @@ wa_dump_block_wise: true
 
 # Whether to use layerwise loading/saving (optional, default: True for UCMConnector)
 use_layerwise: true
+
+# Enable the no-I/O layerwise timing monitor. When true, UCM always selects
+# the monitoring connector and skips all KV-cache lookup, load, and dump work.
+# It records the interval between a layer's logical load submission and its
+# corresponding wait_for_layer_load call, and logs scheduler-side HBM-prefix
+# statistics available from build_connector_meta.
+use_layerwise_performance_monitor: false
 # hit_ratio: 0.9
 
 # Whether to record requests' traces (optional, default: False)

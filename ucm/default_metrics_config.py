@@ -640,6 +640,14 @@ _HISTOGRAM_METRICS = [
         [0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 20, 50],
     ),
     (
+        "layerwise_monitor_load_to_wait_ms",
+        (
+            "Elapsed time from a layer's logical load submission to its "
+            "corresponding wait_for_layer_load call in the no-I/O layerwise monitor (ms)"
+        ),
+        [0.1, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000],
+    ),
+    (
         "layerwise_first_layer_submit_ms",
         (
             "Time to submit first layer load tasks during start_load_kv - TTFT critical "
