@@ -204,11 +204,28 @@ def _cache_posix_pipeline_builder(
 ):
     store_dir = Path(__file__).resolve().parent.parent
     posix_config = copy.deepcopy(config)
+    cache_config = copy.deepcopy(config)
+    ucm_cores = list(config.get("cpu_affinity_cores", []))
+    cache_cores = config.get("cache_cpu_affinity_cores")
+    posix_cores = config.get("posix_cpu_affinity_cores")
+    if cache_cores is None and posix_cores is None and len(ucm_cores) >= 4:
+        cache_core_count = max(2, len(ucm_cores) // 4)
+        cache_cores = ucm_cores[:cache_core_count]
+        posix_cores = ucm_cores[cache_core_count:]
+    if cache_cores is not None:
+        cache_config["cpu_affinity_cores"] = list(cache_cores)
+    if posix_cores is not None:
+        posix_config["cpu_affinity_cores"] = list(posix_cores)
+    effective_posix_cores = list(posix_cores) if posix_cores is not None else ucm_cores
+    if effective_posix_cores:
+        posix_config.setdefault(
+            "posix_data_trans_concurrency", len(effective_posix_cores)
+        )
     if config.get("device_id", -1) >= 0:
         posix_config |= {"tensor_size": config["shard_size"]}
     _preload_metrics(store_dir)
     pipeline.Stack("Posix", str(store_dir / "posix/libposixstore.so"), posix_config)
-    pipeline.Stack("Cache", str(store_dir / "cache/libcachestore.so"), config)
+    pipeline.Stack("Cache", str(store_dir / "cache/libcachestore.so"), cache_config)
 
 
 def _build_cache_compress_posix_pipeline(
@@ -259,8 +276,12 @@ def _posix_pipeline_builder(
     config: Dict[str, object], pipeline: ucmpipelinestore.PipelineStore
 ):
     store_dir = Path(__file__).resolve().parent.parent
+    posix_config = copy.deepcopy(config)
+    ucm_cores = list(config.get("cpu_affinity_cores", []))
+    if ucm_cores:
+        posix_config.setdefault("posix_data_trans_concurrency", len(ucm_cores))
     _preload_metrics(store_dir)
-    pipeline.Stack("Posix", str(store_dir / "posix/libposixstore.so"), config)
+    pipeline.Stack("Posix", str(store_dir / "posix/libposixstore.so"), posix_config)
 
 
 def _cache_fake_pipeline_builder(

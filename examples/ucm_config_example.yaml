@@ -16,6 +16,14 @@ ucm_connectors:
       store_pipeline: "Cache|Posix"
       storage_backends: "/mnt/test"
       io_direct: false
+      # With VLLM_CPU_AFFINITY=1 on vLLM-Ascend, Cache|Posix automatically
+      # assigns one quarter of UCM cores (at least two) to Cache and the
+      # remainder to Posix. Override either list only for manual tuning.
+      # cache_cpu_affinity_cores: [0, 1]
+      # posix_cpu_affinity_cores: [2, 3, 4, 5]
+      # When affinity cores are supplied, Posix defaults its per-direction
+      # transfer concurrency to the number of Posix cores. Override as needed.
+      # posix_data_trans_concurrency: 4
       # cache_buffer_capacity_gb: 256
       # posix_capacity_gb: 1024
 

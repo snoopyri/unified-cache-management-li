@@ -1,5 +1,7 @@
 """UCM-aware CPU role allocation for vLLM-Ascend 0.23.0rc1."""
 
+import os
+
 import psutil
 
 from ucm.integration.vllm.patch.cpu_binding_affinity_patch import (
@@ -12,6 +14,18 @@ from ucm.integration.vllm.patch.cpu_binding_affinity_patch import (
     print_plan as print_ucm_plan,
 )
 
+_UCM_CPU_AFFINITY_CORES_ENV = "UCM_CPU_AFFINITY_CORES"
+
+
+def _publish_ucm_cores(self) -> None:
+    """Make this rank's UCM CPU subset available to the later store setup."""
+    current_npu = self.device_info.running_npu_list[self.rank_id]
+    ucm_cores = getattr(self, "assign_ucm", {}).get(current_npu, [])
+    if ucm_cores:
+        os.environ[_UCM_CPU_AFFINITY_CORES_ENV] = ",".join(map(str, ucm_cores))
+    else:
+        os.environ.pop(_UCM_CPU_AFFINITY_CORES_ENV, None)
+
 
 def allocate(self) -> None:
     """Reserve UCM cores while retaining v0.23.0rc1 device-specific rules."""
@@ -22,6 +36,7 @@ def allocate(self) -> None:
         self.assign_ucm = {}
         for npu, cpu_pool in self.npu_cpu_pool.items():
             assign_cpu_roles(self, npu, cpu_pool, [], [])
+        _publish_ucm_cores(self)
         return
 
     self.assign_ucm = {}
@@ -35,6 +50,7 @@ def allocate(self) -> None:
             )
         main = cpu_pool[2:-2] if reserve_irq_cpus else cpu_pool[:-2]
         assign_cpu_roles(self, npu, main, [cpu_pool[-2]], [cpu_pool[-1]])
+    _publish_ucm_cores(self)
 
 
 def print_plan(self) -> None:

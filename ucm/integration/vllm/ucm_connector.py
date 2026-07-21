@@ -201,6 +201,28 @@ def _use_ucm_connector_cpu_affinity() -> bool:
     )
 
 
+def _get_npu_ucm_cpu_affinity_cores() -> Optional[list[int]]:
+    """Read the UCM core subset allocated by the vLLM-Ascend CPU binder."""
+    if (
+        os.getenv("VLLM_CPU_AFFINITY") != "1"
+        or getattr(current_platform, "device_type", None) != "npu"
+    ):
+        return None
+
+    raw_cores = os.getenv("UCM_CPU_AFFINITY_CORES", "")
+    if not raw_cores:
+        return None
+    try:
+        cores = [int(core) for core in raw_cores.split(",") if core]
+    except ValueError:
+        logger.warning("Ignoring invalid UCM_CPU_AFFINITY_CORES value: %r", raw_cores)
+        return None
+    if not cores or any(core < 0 for core in cores):
+        logger.warning("Ignoring invalid UCM_CPU_AFFINITY_CORES value: %r", raw_cores)
+        return None
+    return cores
+
+
 @dataclass
 class RequestMeta:
     ucm_block_ids: list[bytes] = field(default_factory=list)
@@ -564,6 +586,7 @@ class UCMDirectConnector(KVConnectorBase_V1):
         block_size_override: Optional[int] = None,
         unique_id_suffix: str = "",
         compact_cache_buffer_capacity: bool = False,
+        cpu_affinity_cores: Optional[list[int]] = None,
     ) -> UcmKVStoreBaseV1:
         if len(self.connector_configs) != 1:
             raise RuntimeError(
@@ -651,6 +674,8 @@ class UCMDirectConnector(KVConnectorBase_V1):
                 gpu_kv_buffer_sizes.append(key[1])
             config["gpu_kv_buffer_addrs"] = gpu_kv_buffer_addrs
             config["gpu_kv_buffer_sizes"] = gpu_kv_buffer_sizes
+            if cpu_affinity_cores:
+                config["cpu_affinity_cores"] = list(cpu_affinity_cores)
         else:
             config_base = self.block_size * self.element_size * self.head_size
             config["block_size"] = (
@@ -695,14 +720,18 @@ class UCMDirectConnector(KVConnectorBase_V1):
 
         self.device = create_device()
 
+        npu_store_cores = _get_npu_ucm_cpu_affinity_cores()
         enable_affinity = _use_ucm_connector_cpu_affinity()
         worker_cores, store_cores = (
             self.device.split_cores(self.local_rank)
             if enable_affinity
-            else (None, None)
+            else (None, npu_store_cores)
         )
 
-        self.store = self._create_store(self.kv_cache_layout, store_cores)
+        self.store = self._create_store(
+            self.kv_cache_layout,
+            cpu_affinity_cores=store_cores,
+        )
 
         if worker_cores:
             try:
